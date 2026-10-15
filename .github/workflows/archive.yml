@@ -1,0 +1,64 @@
+# Adds every finished match to the archive site, every three hours.
+#
+# This file is published to `.github/workflows/archive.yml` of the PUBLIC repo
+# `tm-droid/bouncer-archive` by `publish-archiver.yml` in the app repo, together with the archiver.
+# Edit it there, in `appwrite/tools/archive/`, never here: the next publish replaces this repo's
+# `main`.
+#
+# It runs here, not in the app repo, because a public repo's Actions minutes are free and the app
+# repo's are not (its CI alone used ~1,600 of them in the first half of October 2026).
+#
+# The site is the `gh-pages` branch, appended to, never rebuilt: its source is pruned from Appwrite.
+#
+# Required secret: APPWRITE_API_KEY, a key with only `rows.read` and `files.read`.
+
+name: Archive matches
+
+on:
+  schedule:
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: site
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Test
+        run: npm test
+
+      - name: Archive
+        env:
+          APPWRITE_ENDPOINT: https://sgp.cloud.appwrite.io/v1
+          APPWRITE_PROJECT_ID: 6a02f7f3000e6e100b19
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
+        run: node archive.mjs site
+
+      - name: Publish
+        working-directory: site
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git -c user.name="bouncer-archive" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Archive $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q origin gh-pages
