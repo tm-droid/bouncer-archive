@@ -1,0 +1,43 @@
+# Fails when the Appwrite project stops answering.
+#
+# On Appwrite's Free plan a project is paused after seven days with no development activity in the
+# Console. Traffic from the app does not count, and a paused project serves nothing: every screen
+# backed by Appwrite goes blank and the scheduled functions stop. Nothing in the app can report
+# that, because the thing that is down is the backend the report would describe.
+#
+# This is an alarm, not a keep-alive: API requests do not reset the inactivity clock. When it
+# fails, open the Console and restore the project. Opening the Console once a week prevents it.
+#
+# No secret: `live-count` is a public file, read the way the app reads it.
+#
+# Published to `.github/workflows/appwrite-alive.yml` of the PUBLIC repo `tm-droid/bouncer-archive`
+# by `publish-archiver.yml` in the app repo, beside the archiver. Edit it there, in
+# `appwrite/tools/archive/workflow/`, never here: the next publish replaces this repo's `main`. It
+# moved here from the app repo in October 2026 because a public repo's Actions minutes are free;
+# every six hours there was ~120 billed minutes a month. Its scheduled runs are attributed to
+# tm-droid, so a failure still emails the owner.
+
+name: Appwrite alive
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read a public file
+        run: |
+          set -euo pipefail
+          url='https://sgp.cloud.appwrite.io/v1/storage/buckets/cricket-stats/files/live-count/download'
+          status=$(curl -sS -o body.txt -w '%{http_code}' --max-time 30 -H 'X-Appwrite-Project: 6a02f7f3000e6e100b19' "$url" || echo 000)
+          echo "HTTP $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Appwrite answered $status: $(head -c 400 body.txt)"
+            echo "A 'project_paused' body means the Free-plan inactivity pause: restore it in the Console."
+            echo "A 402 means a plan quota is spent for the billing period."
+            exit 1
+          fi

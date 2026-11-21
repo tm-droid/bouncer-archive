@@ -1,0 +1,9 @@
+{
+  "name": "bouncer-archive",
+  "private": true,
+  "type": "module",
+  "description": "Archives every finished match's commentary, scorecard and context to the public site tm-droid/bouncer-archive (GitHub Pages). Run by that repo's archive workflow.",
+  "scripts": {
+    "test": "node --test"
+  }
+}

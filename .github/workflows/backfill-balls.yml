@@ -1,0 +1,80 @@
+# Adds ball-by-ball data (structured, no commentary text) to the archive site's match files, a
+# budgeted slice per run, resumable through `balls-state.json` on gh-pages.
+#
+# Manual only: the backfill runs from the owner's Mac (decided 2026-10-24, command at the top of
+# backfill-balls.mjs). This is the fallback if that path stops working.
+#
+# Published to `.github/workflows/backfill-balls.yml` of the PUBLIC repo `tm-droid/bouncer-archive` by
+# `publish-archiver.yml` (it copies every workflow/*.yml). Edit it in `appwrite/tools/archive/`.
+#
+# Run it once by hand with `probe` ticked first: Cricbuzz may block GitHub's IPs. A probe makes 3
+# requests, changes nothing, and fails the run on 403/429.
+
+name: Backfill balls
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: 'Only probe Cricbuzz (3 requests), change nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Shared with archive.yml so the two never push gh-pages together.
+concurrency:
+  group: archive
+  cancel-in-progress: false
+
+jobs:
+  balls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: site
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Test
+        run: npm test
+
+      - name: Probe
+        if: ${{ inputs.probe }}
+        run: node backfill-balls.mjs --probe
+
+      - name: Crawl
+        if: ${{ !inputs.probe }}
+        run: |
+          set +e
+          node backfill-balls.mjs --site site --max-requests 400 --delay-ms 3000
+          code=$?
+          if [ "$code" = "2" ]; then echo "::warning::Cricbuzz answered 403/429; state saved, stopping"; exit 0; fi
+          exit "$code"
+
+      - name: Publish
+        if: ${{ !inputs.probe }}
+        working-directory: site
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git -c user.name="bouncer-archive" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Balls $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase -q origin gh-pages && git push -q origin gh-pages && exit 0
+            echo "push attempt $i failed; retrying"
+            git rebase --abort 2>/dev/null || true
+            sleep $((i * 10))
+          done
+          echo "::error::could not push gh-pages"
+          exit 1
